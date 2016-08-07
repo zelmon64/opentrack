@@ -73,11 +73,14 @@ private:
 
     rmat r_b, r_b_real;
     double t_b[3];
+    euler_t euler_b, euler_b_real, euler_subtract, euler_subtract_real;
 
     double map(double pos, Mapping& axis);
     void logic();
     void t_compensate(const rmat& rmat, const euler_t& ypr, euler_t& output, bool rz);
     void run() override;
+
+    double unrotated_center_of_axis(const euler_t& euler_b, int idx, const rmat& r) const;
 
     static constexpr double pi = OPENTRACK_PI;
     static constexpr double r2d = 180. / OPENTRACK_PI;

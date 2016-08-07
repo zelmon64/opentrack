@@ -198,6 +198,17 @@ void Tracker::logic()
 
         for (int i = 0; i < 3; i++)
             t_b[i] = t(i);
+
+        euler_b_real = -d2r * euler_t(&value[Yaw]);
+        euler_b = c_div * euler_b_real;
+
+        // roll isn't rotated like that
+        for (int i = 0; i < 3; i++)
+        {
+            euler_subtract_real(i) = unrotated_center_of_axis(euler_b_real, i, r_real);
+            euler_subtract(i) = unrotated_center_of_axis(euler_b, i, r);
+        }
+        qDebug() << "subtract ypr" << (euler_subtract(0) * c_mult * r2d) << (euler_subtract(1) * c_mult * r2d) << (euler_subtract(2) * c_mult * r2d);
     }
 
     {
@@ -210,7 +221,16 @@ void Tracker::logic()
             break;
         // camera
         case 1:
-            r = r * r_b;
+            {
+                euler_t center, center_real;
+                for (int i = 0; i < 3; i++)
+                {
+                    center(i) = unrotated_center_of_axis(euler_b, i, r);
+                    center_real(i) = unrotated_center_of_axis(euler_b_real, i, r_real);
+                }
+                r_real = euler_to_rmat(center_real);// - euler_subtract);
+                r = euler_to_rmat(center);// - c_div * euler_subtract);
+            }
             break;
         }
 
@@ -307,7 +327,7 @@ void Tracker::logic()
 
 void Tracker::run()
 {
-    const int sleep_ms = 3;
+    const int sleep_ms = 4;
 
 #if defined(_WIN32)
     (void) timeBeginPeriod(1);
@@ -367,6 +387,22 @@ void Tracker::run()
         m(i).curve.setTrackingActive(false);
         m(i).curveAlt.setTrackingActive(false);
     }
+}
+
+double Tracker::unrotated_center_of_axis(const Tracker::euler_t& euler_b, int idx, const Tracker::rmat& r) const
+{
+    using namespace euler;
+
+    euler_t ypr(euler_b);
+    ypr(idx) = 0;
+    return rmat_to_euler(euler_to_rmat(ypr).t() *
+                         r *
+                         progn(
+                            euler_t e;
+                            e(idx) = euler_b(idx);
+                            return euler_to_rmat(e);
+                         )
+    )(idx);
 }
 
 void Tracker::get_raw_and_mapped_poses(double* mapped, double* raw) const
