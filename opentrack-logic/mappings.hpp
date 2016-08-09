@@ -54,6 +54,10 @@ public:
     inline Mapping& operator()(int i) { return axes[i]; }
     inline const Mapping& operator()(int i) const { return axes[i]; }
 
+
+    inline Mapping& operator()(unsigned i) { return axes[i]; }
+    inline const Mapping& operator()(unsigned i) const { return axes[i]; }
+
     void load_mappings()
     {
         mem<QSettings> iniFile = group::ini_file();

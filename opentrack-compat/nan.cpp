@@ -1,17 +1,12 @@
 #include <cmath>
+#include <cinttypes>
 #include "export.hpp"
 
-#if defined(__GNUC__)
-extern "C" OPENTRACK_COMPAT_EXPORT bool __attribute__ ((noinline)) nanp(double value)
-#elif defined(_WIN32)
-extern "C" OPENTRACK_COMPAT_EXPORT __declspec(noinline) bool nanp(double value)
-#else
-extern "C" OPENTRACK_COMPAT_EXPORT bool nanp(double value)
-#endif
+OPENTRACK_COMPAT_EXPORT bool nanp(double value)
 {
-    using std::isnan;
-    using std::isinf;
+    union { double d; std::uint64_t x; } u = { value };
+    const bool is_nan = (u.x << 1) > 0xff70000000000000ull;
+    const bool is_inf = (u.x << 1) == 0xff70000000000000ull;
 
-    const volatile double x = value;
-    return isnan(x) || isinf(x);
+    return is_nan || is_inf;
 }

@@ -21,6 +21,13 @@
 #   include <windows.h>
 #endif
 
+constexpr double Tracker::pi;
+constexpr double Tracker::r2d;
+constexpr double Tracker::d2r;
+
+constexpr double Tracker::c_mult;
+constexpr double Tracker::c_div;
+
 Tracker::Tracker(Mappings &m, SelectedLibraries &libs, TrackLogger &logger) :
     m(m),
     newpose {0,0,0, 0,0,0},
@@ -31,8 +38,7 @@ Tracker::Tracker(Mappings &m, SelectedLibraries &libs, TrackLogger &logger) :
     libs(libs),
     logger(logger),
     r_b(get_camera_offset_matrix(c_div).t()),
-    r_b_real(get_camera_offset_matrix(1).t()),
-    t_b {0,0,0}
+    r_b_real(get_camera_offset_matrix(1).t())
 {
 }
 
@@ -57,16 +63,16 @@ Tracker::rmat Tracker::get_camera_offset_matrix(double c)
 double Tracker::map(double pos, Mapping& axis)
 {
     bool altp = (pos < 0) && axis.opts.altp;
-    axis.curve.setTrackingActive( !altp );
-    axis.curveAlt.setTrackingActive( altp );
-    auto& fc = altp ? axis.curveAlt : axis.curve;
-    return fc.getValue(pos);
+    axis.curve.setTrackingActive(!altp);
+    axis.curveAlt.setTrackingActive(altp);
+    Map& fc = altp ? axis.curveAlt : axis.curve;
+    return fc.getValue(float(pos));
 }
 
-void Tracker::t_compensate(const rmat& rmat, const euler_t& xyz_, euler_t& output, bool rz)
+void Tracker::t_compensate(const rmat& rmat, const vec3& xyz_, vec3& output, bool rz)
 {
     // TY is really yaw axis. need swapping accordingly.
-    const euler_t ret = rmat * euler_t(xyz_(TZ), -xyz_(TX), -xyz_(TY));
+    const vec3 ret = rmat * vec3(xyz_(TZ), -xyz_(TX), -xyz_(TY));
     if (!rz)
         output(2) = ret(0);
     else
@@ -75,106 +81,65 @@ void Tracker::t_compensate(const rmat& rmat, const euler_t& xyz_, euler_t& outpu
     output(0) = -ret(1);
 }
 
-#include "opentrack-compat/nan.hpp"
-
-static inline double elide_nan(double value, double def)
+void Tracker::stage1_camera_offset(Tracker::state& s)
 {
-    if (nanp(value))
+    s.camera_offset_real = get_camera_offset_matrix(1);
+    s.camera_offset_scaled = get_camera_offset_matrix(c_div);
+
+    s.check_nan(s.camera_offset_real);
+    s.check_nan(s.camera_offset_scaled);
+}
+
+void Tracker::stage2_raw(state& st)
+{
+    for (unsigned i = 0; i < 6; i++)
     {
-        if (nanp(def))
-            return 0;
-        return def;
+        Mapping& axis = m(i);
+        const int k = axis.opts.src;
+        if (k < 0 || k >= 6)
+            st.pose(i) = 0;
+        else
+            st.pose(i) = st.tracker_input(k);
     }
-    return value;
+
+    for (unsigned i = 3; i < 6; i++)
+        if (std::fabs(st.pose(i)) > 180)
+            st.pose(i) = std::copysign(360. - std::fabs(st.pose(i)), -st.pose(i));
+
+    logger.write_pose(st.tracker_input); // raw
+
+    st.check_nan(st.tracker_input);
+    st.check_nan(st.pose);
 }
 
-static bool is_nan(const dmat<3,3>& r, const dmat<3, 1>& t)
+void Tracker::stage3_rmat(state& st)
 {
-    for (int i = 0; i < 3; i++)
-        for (int j = 0; j < 3; j++)
-            if (nanp(r(i, j)))
-                return true;
-
-    for (int i = 0; i < 3; i++)
-        if (nanp(t(i)))
-            return true;
-
-    return false;
-}
-
-static bool is_nan(const Pose& value)
-{
-    for (int i = 0; i < 6; i++)
-        if (nanp(value(i)))
-            return true;
-    return false;
-}
-
-constexpr double Tracker::c_mult;
-constexpr double Tracker::c_div;
-
-void Tracker::logic()
-{
-    bool inverts[6] = {
-        m(0).opts.invert,
-        m(1).opts.invert,
-        m(2).opts.invert,
-        m(3).opts.invert,
-        m(4).opts.invert,
-        m(5).opts.invert,
-    };
+    vec3 tmp = d2r * vec3(&st.pose[Yaw]);
 
     using namespace euler;
 
-    Pose value, raw;
+    st.r_pose_real = euler_to_rmat(tmp);
+    st.r_pose_scaled = euler_to_rmat(c_div * tmp);
 
-    for (int i = 0; i < 6; i++)
-    {
-        auto& axis = m(i);
-        int k = axis.opts.src;
-        if (k < 0 || k >= 6)
-            value(i) = 0;
-        else
-            value(i) = newpose[k];
-        raw(i) = newpose[i];
-    }
+    st.check_nan(st.r_pose_real);
+    st.check_nan(st.r_pose_scaled);
+}
 
-    logger.write_pose(raw); // raw
+void Tracker::stage4_apply_camera_offset(state& st)
+{
+    st.r_pose_real = st.r_pose_real * st.camera_offset_real;
+    st.r_pose_scaled = st.r_pose_scaled * st.camera_offset_scaled;
+}
 
-    if (is_nan(raw))
-        raw = last_raw;
-
-    // TODO fix gimbal lock by dividing euler angle input by >=3.
-    // maintain the real rmat separately for translation compensation
-    // TODO split this function, it's too big
-    rmat r, r_real;
-
-    {
-        euler_t tmp = d2r * euler_t(&value[Yaw]);
-        r = euler_to_rmat(c_div * tmp);
-        r_real = euler_to_rmat(tmp);
-    }
-
-    euler_t t(value(0), value(1), value(2));
-
-    bool do_center_now = false;
-    bool nan = is_nan(r, t);
-
-    if (centerp && !nan)
-    {
-        for (int i = 0; i < 6; i++)
-            if (fabs(newpose[i]) != 0)
-            {
-                do_center_now = true;
-                break;
-            }
-    }
-
-    const rmat cam = get_camera_offset_matrix(c_div);
-    const rmat cam_real = get_camera_offset_matrix(1);
-
-    r = r * cam;
-    r_real = r_real * cam_real;
+void Tracker::stage5_maybe_set_center(state& st)
+{
+    const bool do_center_now = centerp &&
+            progn(
+                for (unsigned i = 0; i < 6; i++)
+                    if (st.tracker_input(i) != 0.0)
+                        return true;
+                return false;
+            );
 
     if (do_center_now)
     {
@@ -185,81 +150,145 @@ void Tracker::logic()
 
         if (libs.pTracker->center())
         {
-            r_b = cam.t();
-            r_b_real = cam_real.t();
-            r = rmat::eye();
-            r_real = rmat::eye();
+            st.r_center_real = st.camera_offset_real.t();
+            st.r_center_scaled = st.camera_offset_scaled.t();
+            st.r_pose_real = rmat::eye();
+            st.r_pose_scaled = rmat::eye();
         }
         else
         {
-            r_b = r.t();
-            r_b_real = r_real.t();
+            st.r_center_real = st.r_pose_real.t();
+            st.r_center_scaled = st.r_pose_scaled.t();
         }
 
-        for (int i = 0; i < 3; i++)
-            t_b[i] = t(i);
+        st.t_center = vec3(&st.pose[0]);
     }
+}
 
+void Tracker::stage6_center(state& st)
+{
+    switch (s.center_method)
     {
-        switch (s.center_method)
-        {
-        // inertial
-        case 0:
-        default:
-            r = r_b * r;
-            break;
+    // inertial
+    case 0:
+    default:
+        st.r_pose_real = st.r_center_real * st.r_pose_real;
+        st.r_pose_scaled = st.r_center_scaled * st.r_pose_scaled;
+        break;
         // camera
-        case 1:
-            r = r * r_b;
-            break;
-        }
+    case 1:
+        st.r_pose_real = st.r_pose_real * st.r_center_real;
+        st.r_pose_scaled = st.r_pose_scaled * st.r_center_scaled;
+        break;
+    }
+}
 
-        const euler_t rot = r2d * c_mult * rmat_to_euler(r);
-        euler_t pos(t(0) - t_b[0], t(1) - t_b[1], t(2) - t_b[2]);
+void Tracker::stage7_update_euler(state& st)
+{
+    using namespace euler;
 
-        if (s.use_camera_offset_from_centering)
-            t_compensate(r_b_real.t() * cam_real.t(), pos, pos, false);
-        else
-            t_compensate(cam_real.t(), pos, pos, false);
+    const vec3 rot(r2d * c_mult * rmat_to_euler(st.r_pose_scaled));
+    vec3 pos(vec3(&st.pose[0]) - st.t_center);
 
-        for (int i = 0; i < 3; i++)
-        {
-            value(i) = pos(i);
-            value(i+3) = rot(i);
-        }
+    if (s.use_camera_offset_from_centering)
+        t_compensate(st.r_center_real.t() * st.camera_offset_real.t(), pos, pos, false);
+    else
+        t_compensate(st.camera_offset_real.t(), pos, pos, false);
+
+    st.check_nan(rot);
+    st.check_nan(pos);
+
+    for (int i = 0; i < 3; i++)
+    {
+        st.pose(i) = pos(i);
+        st.pose(i+3) = rot(i);
     }
 
-    logger.write_pose(value); // "corrected" - after various transformations to account for camera position
+    logger.write_pose(st.pose); // "corrected" - after various transformations to account for camera position
+}
+
+void Tracker::stage8_filter(state& st)
+{
+    const vec6 tmp(st.pose);
+
+    if (libs.pFilter)
+        libs.pFilter->filter(tmp, st.pose);
+
+    st.check_nan(st.pose);
+
+    logger.write_pose(st.pose);
+}
+
+void Tracker::stage9_map_rotation(state& st)
+{
+    // CAVEAT rotation only, due to tcomp
+    for (unsigned i = 3; i < 6; i++)
+        st.pose(i) = map(st.pose(i), m(i));
+
+    st.check_nan(st.pose);
+}
+
+// CAVEAT translation only, due to tcomp
+void Tracker::stage10_map_translation(state& st)
+{
+    if (s.tcomp_p)
+    {
+        vec3 value_(st.pose(TX), st.pose(TY), st.pose(TZ));
+
+        using namespace euler;
+
+        t_compensate(euler_to_rmat(vec3(st.pose(Yaw) * d2r, st.pose(Pitch) * d2r, st.pose(Roll) * d2r)),
+                     value_,
+                     value_,
+                     s.tcomp_tz);
+
+        st.check_nan(value_);
+
+        for (unsigned i = 0; i < 3; i++)
+            st.pose(i) = value_(i);
+    }
+
+    for (unsigned i = 0; i < 3; i++)
+        st.pose(i) = map(st.pose(i), m(i));
+
+    st.check_nan(st.pose);
+
+    // logger.write_pose(value); // "mapped"
+}
+
+void Tracker::stage11_transform(state& st)
+{
+    for (unsigned i = 0; i < 6; i++)
+        st.pose(i) += m(i).opts.zero;
+
+    for (unsigned i = 0; i < 6; i++)
+        st.pose(i) *= int(m(i).opts.invert) * -2 + 1;
+
+    if (zero_)
+        for (unsigned i = 0; i < 6; i++)
+            st.pose(i) = 0;
+}
+
+void Tracker::run_pipeline()
+{
+    {
+
+    }
 
     // whenever something can corrupt its internal state due to nan/inf, elide the call
     if (is_nan(value))
     {
         nan = true;
-        logger.write_pose(value); // "filtered"
+         // "filtered"
     }
     else
     {
         {
-            Pose tmp = value;
 
-            if (libs.pFilter)
-                libs.pFilter->filter(tmp, value);
         }
         logger.write_pose(value); // "filtered"
 
-        // CAVEAT rotation only, due to tcomp
-        for (int i = 3; i < 6; i++)
-            value(i) = map(value(i), m(i));
 
-        for (int i = 0; i < 6; i++)
-            value(i) += m(i).opts.zero;
-
-        for (int i = 0; i < 6; i++)
-            value(i) *= int(inverts[i]) * -2 + 1;
-
-        if (zero_)
-            for (int i = 0; i < 6; i++)
-                value(i) = 0;
 
         if (is_nan(value))
             nan = true;
@@ -282,7 +311,7 @@ void Tracker::logic()
     for (int i = 0; i < 3; i++)
         value(i) = map(value(i), m(i));
 
-    logger.write_pose(value); // "mapped"
+
 
     if (nan)
     {
@@ -354,7 +383,7 @@ void Tracker::run()
 
     {
         // filter may inhibit exact origin
-        Pose p;
+        vec6 p;
         libs.pProtocol->pose(p);
     }
 
