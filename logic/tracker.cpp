@@ -48,9 +48,7 @@ Tracker::rmat Tracker::camera_offset(double c)
 {
     const double off[] =
     {
-        d2r * c * (double)-s.camera_yaw,
-        d2r * c * (double)-s.camera_pitch,
-        d2r * c * (double)-s.camera_roll
+        0, 0, 0,
     };
 
     return euler::euler_to_rmat(off);
@@ -194,7 +192,7 @@ void Tracker::logic()
 
         tracking_started &= !nanp;
 
-        if (tracking_started && s.center_at_startup)
+        if (tracking_started)
         {
             set(f_center, true);
         }
@@ -224,7 +222,7 @@ void Tracker::logic()
     {
         rmat rotation;
 
-        switch (s.center_method)
+        switch (1)
         {
         // inertial
         case 0:
@@ -280,9 +278,10 @@ void Tracker::logic()
     nanp |= is_nan(value);
 
     {
+#if 0
         euler_t neck, rel;
 
-        if (s.neck_enable)
+        if (false)
         {
             double nz = -s.neck_z;
 
@@ -333,6 +332,7 @@ void Tracker::logic()
             value(i) += neck(i) + rel(i);
 
         nanp |= is_nan(neck) | is_nan(rel) | is_nan(value);
+#endif
     }
 
     // CAVEAT translation only, due to tcomp
@@ -355,9 +355,11 @@ void Tracker::logic()
         for (int i = 0; i < 6; i++)
             value(i) = 0;
 
+#if 0
     // custom zero position
     for (int i = 0; i < 6; i++)
         value(i) += m(i).opts.zero * (m(i).opts.invert ? -1 : 1);
+#endif
 
     if (!nanp)
         libs.pProtocol->pose(value);
