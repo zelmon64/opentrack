@@ -47,6 +47,8 @@ OptionsDialog::OptionsDialog(std::function<void(bool)> pause_keybindings) :
     tie_setting(main.tray_enabled, ui.trayp);
     tie_setting(main.tray_start, ui.tray_start);
 
+#if 0
+
     tie_setting(main.center_at_startup, ui.center_at_startup);
 
     tie_setting(main.tcomp_p, ui.tcomp_enable);
@@ -92,6 +94,8 @@ OptionsDialog::OptionsDialog(std::function<void(bool)> pause_keybindings) :
 
     tie_setting(main.neck_enable, ui.neck_enable);
 
+#endif
+
     ui.disable_translation->setChecked(QSettings(OPENTRACK_ORG).value("disable-translation", false).toBool());
 
     struct tmp
@@ -107,6 +111,7 @@ OptionsDialog::OptionsDialog(std::function<void(bool)> pause_keybindings) :
         { main.key_toggle1, ui.toggle_text, ui.bind_toggle },
         { main.key_toggle2, ui.toggle_text_2, ui.bind_toggle_2 },
 
+#if 0
         { main.key_toggle_press1, ui.toggle_held_text, ui.bind_toggle_held },
         { main.key_toggle_press2, ui.toggle_held_text_2, ui.bind_toggle_held_2 },
 
@@ -115,6 +120,7 @@ OptionsDialog::OptionsDialog(std::function<void(bool)> pause_keybindings) :
 
         { main.key_zero_press1, ui.zero_held_text, ui.bind_zero_held },
         { main.key_zero_press2, ui.zero_held_text_2, ui.bind_zero_held_2 },
+#endif
 
         { main.key_start_tracking1, ui.start_tracking_text, ui.bind_start },
         { main.key_start_tracking2, ui.start_tracking_text_2, ui.bind_start_2 },
@@ -209,7 +215,7 @@ void OptionsDialog::doOK()
         return;
 
     main.b->save();
-    ui.game_detector->save();
+    //ui.game_detector->save();
     set_disable_translation_state(ui.disable_translation->isChecked());
     emit closing();
 }
@@ -223,7 +229,7 @@ void OptionsDialog::doCancel()
         return;
 
     main.b->reload();
-    ui.game_detector->revert();
+    //ui.game_detector->revert();
     emit closing();
 }
 
