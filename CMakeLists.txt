@@ -65,6 +65,7 @@ file(GLOB opentrack-subprojects
     "macosx/${C}"
     "cv/${C}"
     "migration/${C}"
+    "calibrator-wizard/${C}"
 )
 
 list(SORT opentrack-subprojects)

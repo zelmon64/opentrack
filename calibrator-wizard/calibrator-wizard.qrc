@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/calibrator">
+        <file>images/action-bottom.png</file>
+        <file>images/action-left.png</file>
+        <file>images/action-right.png</file>
+        <file>images/action-top.png</file>
+        <file>images/hold-bottom.png</file>
+        <file>images/hold-left.png</file>
+        <file>images/hold-right.png</file>
+        <file>images/hold-top.png</file>
+    </qresource>
+</RCC>
