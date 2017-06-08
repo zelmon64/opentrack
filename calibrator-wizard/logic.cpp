@@ -1,4 +1,4 @@
-#include "wizard-logic.hpp"
+#include "logic.hpp"
 
 static constexpr action actions[] = {
     // centered, yaw left/right
